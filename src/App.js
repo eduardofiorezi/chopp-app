@@ -9,43 +9,80 @@ const GET_QUANTITY_URL = "/servicetappsrpifair/webresources/api/mlservido"
 
 const OPTS = {
 	"tap_number": 1,
-	"volume": 400
+	"volume": 300
 }
 
-const Instascan = require('instascan');
+const STATUSES = {
+  'CLOSED': 'closed',
+  'OPEN': ' open'
+};
+
 
 function App() {
   const [customerId, setCustomerId] = React.useState('');
   const [quantity, setQuantity] = React.useState(0);
+  const [history, setHistory] = React.useState({});
+  const [status, setStatus] = React.useState(STATUSES.CLOSED);
+  const videoRef  = React.useRef(null);
 
   React.useEffect(() => {
+    console.log('persist', history);
+    localStorage.setItem('history', JSON.stringify(history));
+  }, [history]);
+
+  React.useEffect(() => {
+    const stored = localStorage.getItem('history');
+    setHistory(JSON.parse(stored));
     const interval = setInterval(() => {
       axios.post(GET_QUANTITY_URL, OPTS).then(res => {
-        setQuantity(res.data);
+        if (res.data === quantity) {
+          setStatus(STATUSES.CLOSED);
+        } else {
+          setStatus(STATUSES.OPEN);
+          setQuantity(res.data);
+        }
       })
     }, 500);
     return () => { clearInterval(interval); }
-  }, [quantity]);
+  }, []);
 
-  const handleSubmit=(e) => {
+  const openCamera=(e) => {
     e.preventDefault()
-    axios.post(OPEN_TAP_URL, OPTS)
-    .then(res => console.log(res))
-    .catch(err => {
-      console.log(err);
-    });
-  };
 
-    // fetch("https://dog.ceo/api/breeds/image/random")
-    // .then(res => res.json())
-    // .then(data => {
-    //   record.done = true;
-    //   record.data = data.message;
-    // })
-    // .catch(err => {
-    //   throw err;
-    // });
-  // }
+    const scanner = new Instascan.Scanner({
+      video: videoRef.current,
+      backgroundScan: false,
+      scanPeriod: 2,
+    });
+
+    scanner.addListener('scan', (token) => {
+      const lastToken = localStorage.getItem('lastToken');
+      const lastHistory = JSON.parse(localStorage.getItem('history'));
+      if (lastToken) {
+        const customerValue = lastHistory[lastToken] || 0;
+        setHistory({
+          ...lastHistory,
+          [lastToken]: customerValue + quantity
+        });
+      }
+      setCustomerId(token);
+      localStorage.setItem('lastToken', token);
+      setQuantity(0);
+      axios.post(OPEN_TAP_URL, OPTS).then(res => {
+        setStatus(STATUSES.OPEN);
+      })
+    });
+
+    Instascan.Camera.getCameras().then(function (cameras) {
+        if (cameras.length > 0) {
+          scanner.start(cameras[0]);
+        } else {
+          console.error('No cameras found.');
+        }
+      }).catch(function (e) {
+        console.error(e);
+      });
+  };
 
   const handleInputChange = (e) => {
     setCustomerId(e.target.value);
@@ -54,14 +91,17 @@ function App() {
   return (
     <div className="App">
       <header className="App-header">
-        <h1>{customerId}: {quantity} ml</h1>
-        <form onSubmit={handleSubmit}>
-          <label htmlFor="customer_id">
-            Seu código:
-            <input type="text" name="customer_id" value={customerId} onChange={handleInputChange} />
-          </label>
-          <button type="submit">Abrir chopeira</button>
-        </form>
+        <video ref={videoRef}></video>
+        <h1 className={status === STATUSES.CLOSED ? "closed" : " open"}>{customerId}: {quantity} ml</h1>
+        <button type="submit" onClick={openCamera}>Abrir Camera</button>
+        <table>
+          <tbody>
+            <tr><th>Cliente</th><th>ML</th></tr>
+            {Object.keys(history).map(cid => (
+              <tr><td>{cid}</td><td>{history[cid]}</td></tr>
+            ))}
+          </tbody>
+        </table>
       </header>
     </div>
   );
